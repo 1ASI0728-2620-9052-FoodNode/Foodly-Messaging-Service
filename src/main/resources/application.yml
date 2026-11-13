@@ -1,0 +1,74 @@
+spring:
+  application:
+    name: messaging-service
+  datasource:
+    # Solo por variables de entorno. Ejemplo: jdbc:mysql://host:3306/messaging
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      data-source-properties:
+        # Aiven exige SSL: REQUIRED (cifra sin verificar el certificado), VERIFY_CA o VERIFY_IDENTITY
+        # (con el certificado de la CA). Para un MySQL local sin SSL, usar DISABLED.
+        sslMode: ${MYSQL_SSL_MODE:REQUIRED}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # El esquema lo crea Flyway; Hibernate solo verifica que coincida con las entidades.
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+messaging:
+  security:
+    jwt:
+      # Mismos valores que IAM: el secreto se usa como texto UTF-8 (mínimo 32 bytes).
+      secret: ${JWT_SECRET}
+      user-id-claim: ${JWT_USER_ID_CLAIM:sub}
+      role-claim: ${JWT_ROLE_CLAIM:role}
+    callback:
+      # Secreto compartido con el Integration System (header X-Callback-Secret).
+      secret: ${INTEGRATION_CALLBACK_SECRET}
+  websocket:
+    # Orígenes permitidos del handshake. La credencial es el JWT del frame CONNECT, no una cookie.
+    allowed-origins: ${MESSAGING_WS_ALLOWED_ORIGINS:*}
+  max-length: ${MESSAGING_MAX_LENGTH:1000}
+  radar-k-ring: ${MESSAGING_RADAR_K_RING:2}
+  lia:
+    # LIA_GATEWAY_MODE: integration-system (por defecto, DD-07), direct-n8n (solo local) o stub (sin IA).
+    mode: ${LIA_GATEWAY_MODE:integration-system}
+    # Tiempo que tiene Lía para responder. Pasado ese tiempo, LiaTimeoutJob avisa al explorador y le
+    # ofrece la reserva manual. El token del explorador se conserva en memoria ese tiempo más el margen,
+    # o hasta que venza el propio token, lo que ocurra primero.
+    timeout-seconds: ${LIA_TIMEOUT_SECONDS:20}
+    token-cache-margin-seconds: ${LIA_TOKEN_CACHE_MARGIN_SECONDS:60}
+    # Tiempo máximo de la llamada HTTP que entrega la solicitud a Lía (no el de su respuesta).
+    request-timeout: ${LIA_REQUEST_TIMEOUT:5s}
+    stub-delay: ${LIA_STUB_DELAY:1s}
+    integration-system:
+      url: ${INTEGRATION_SYSTEM_URL:}
+      path: ${LIA_PATH:}
+    direct-n8n:
+      webhook-url: ${N8N_WEBHOOK_URL:}
+      callback-url: ${MESSAGING_CALLBACK_URL:http://localhost:8080/messaging/callbacks/n8n}
+    timeout-job:
+      interval-ms: ${LIA_TIMEOUT_JOB_INTERVAL_MS:10000}
+      lookback-hours: ${LIA_TIMEOUT_LOOKBACK_HOURS:24}
+      batch-size: ${LIA_TIMEOUT_JOB_BATCH_SIZE:50}
+  # Clientes REST hacia los otros contextos (no se usan con el perfil "stub").
+  clients:
+    timeout: 3s
+    radar:
+      url: ${RADAR_URL}
+      search-path: /radar/search
+    business:
+      url: ${BUSINESS_URL}
+      huarique-path: /business-api/huariques/{id}
+      menu-path: /business-api/huariques/{id}/menu
+    reservation:
+      url: ${RESERVATION_URL}
+      create-path: /reservation-api/reservations
+      status-path: /reservation-api/reservations/{id}

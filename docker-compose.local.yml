@@ -1,0 +1,111 @@
+# Messaging y sus dependencias para desarrollo local.
+#
+#   docker compose -f docker-compose.local.yml up -d --build --wait
+#
+# Por defecto arranca en modo "stub": MySQL + Messaging, sin los otros microservicios ni IA (perfil "stub" de
+# Spring: Radar, Business y Reservation falsos, con datos de ejemplo de Lima, y Lía clasifica por palabras clave).
+#
+# Con n8n (opcional, solo desarrollo; ver docs/n8n-lia-workflow.md):
+#
+#   LIA_GATEWAY_MODE=direct-n8n docker compose -f docker-compose.local.yml --profile n8n up -d --build --wait
+#
+# Con los microservicios reales (por ejemplo, Radar de ../radar-service en la misma red) se quita el perfil
+# "stub" de Spring; la variable se define vacía a propósito:
+#
+#   MESSAGING_PROFILE= docker compose -f docker-compose.local.yml up -d --build --wait
+#
+# Los puertos se publican solo en 127.0.0.1. Se pueden cambiar con las variables de abajo.
+
+name: foodly-messaging
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: messaging
+      MYSQL_USER: messaging
+      MYSQL_PASSWORD: messaging
+      MYSQL_ROOT_PASSWORD: root-local-only
+    ports:
+      # 3307 y no 3306, para no chocar con un MySQL que ya tenga en su equipo.
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - foodly-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  messaging-service:
+    build:
+      context: .
+    image: foodly/messaging-service:local
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${MESSAGING_HOST_PORT:-8081}:8080"
+    environment:
+      SERVER_PORT: "8080"
+      # «-» y no «:-»: MESSAGING_PROFILE= (vacío) quita el perfil stub en lugar de volver al valor por defecto.
+      SPRING_PROFILES_ACTIVE: ${MESSAGING_PROFILE-stub}
+      # Este MySQL local no usa SSL, y con «caching_sha2_password» (el de MySQL 8) eso exige allowPublicKeyRetrieval.
+      # Con SSL (Aiven) no hace falta: ahí MYSQL_SSL_MODE es REQUIRED o más estricto.
+      MYSQL_URL: jdbc:mysql://mysql:3306/messaging?allowPublicKeyRetrieval=true
+      MYSQL_USER: messaging
+      MYSQL_PASSWORD: messaging
+      MYSQL_SSL_MODE: DISABLED
+      # Solo para desarrollo local. En otros entornos, el mismo secreto que usa IAM.
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-0123456789}
+      # Secreto compartido con el Integration System (o con n8n, en direct-n8n). Solo para desarrollo local.
+      INTEGRATION_CALLBACK_SECRET: ${INTEGRATION_CALLBACK_SECRET:-local-dev-callback-secret}
+      LIA_GATEWAY_MODE: ${LIA_GATEWAY_MODE:-stub}
+      LIA_TIMEOUT_SECONDS: ${LIA_TIMEOUT_SECONDS:-20}
+      # Espera del modo stub antes de «responder». Para ver el aviso de timeout: LIA_STUB_DELAY=60s LIA_TIMEOUT_SECONDS=5
+      LIA_STUB_DELAY: ${LIA_STUB_DELAY:-1s}
+      INTEGRATION_SYSTEM_URL: ${INTEGRATION_SYSTEM_URL:-}
+      LIA_PATH: ${LIA_PATH:-}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/lia}
+      # La URL del callback vista desde n8n, que corre en la misma red.
+      MESSAGING_CALLBACK_URL: http://messaging-service:8080/messaging/callbacks/n8n
+      # Solo se usan sin el perfil stub. «radar» es el servicio de ../radar-service/docker-compose.local.yml.
+      RADAR_URL: ${RADAR_URL:-http://radar:8080}
+      BUSINESS_URL: ${BUSINESS_URL:-http://business:8080}
+      RESERVATION_URL: ${RESERVATION_URL:-http://reservation:8080}
+    networks:
+      - foodly-network
+    restart: unless-stopped
+
+  # Opcional: docker compose ... --profile n8n up
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION:-latest}
+    profiles: ["n8n"]
+    ports:
+      - "127.0.0.1:${N8N_HOST_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      # La URL con la que n8n muestra los webhooks de producción.
+      WEBHOOK_URL: http://localhost:${N8N_HOST_PORT:-5678}/
+      # Acceso por http en local: sin esto n8n exige https para la cookie de sesión.
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: America/Lima
+      TZ: America/Lima
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - foodly-network
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  n8n-data:
+
+networks:
+  foodly-network:
+    name: foodly-network

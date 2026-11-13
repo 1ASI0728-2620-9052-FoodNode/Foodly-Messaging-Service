@@ -1,0 +1,5 @@
+# Perfil "stub": sin los otros microservicios. Los clientes de Radar, Business y Reservation son falsos
+# (datos de ejemplo de Lima) y, salvo que se indique otro LIA_GATEWAY_MODE, Lía también (sin n8n ni IA).
+messaging:
+  lia:
+    mode: ${LIA_GATEWAY_MODE:stub}
