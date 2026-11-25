@@ -45,7 +45,7 @@ Reservation) se procesa después, de forma asíncrona.
     { "sender": "EXPLORER", "content": "hola" },
     { "sender": "LIA", "content": "¡Hola! ¿Qué se te antoja hoy?" }
   ],
-  "callbackUrl": "http://messaging-service:8080/messaging/callbacks/n8n",
+  "callbackUrl": "http://messaging-service:8083/messaging/callbacks/n8n",
   "callbackSecret": "local-dev-callback-secret"
 }
 ```
@@ -312,5 +312,5 @@ https://webhook.site).
 | El explorador recibe el aviso de «Lía está tardando»     | n8n no llamó al callback a tiempo: workflow inactivo, `N8N_WEBHOOK_URL` incorrecta o error en OpenAI.   |
 | El callback responde `401`                               | El header `X-Callback-Secret` no coincide con `INTEGRATION_CALLBACK_SECRET`.                            |
 | El callback responde `400`                               | Cuerpo inválido: falta `conversationId` o `inReplyToMessageId`, `type` desconocido, `budgetRange` con un solo extremo o con `min` mayor que `max`, o coordenadas fuera de rango. |
-| n8n no logra llamar al callback (conexión rechazada)     | `MESSAGING_CALLBACK_URL` debe ser la URL **vista desde n8n** (en Docker, `http://messaging-service:8080/…`, no `localhost`). |
+| n8n no logra llamar al callback (conexión rechazada)     | `MESSAGING_CALLBACK_URL` debe ser la URL **vista desde n8n** (en Docker, `http://messaging-service:8083/…`, no `localhost`). |
 | Lía siempre pregunta «¿a qué huarique te refieres?»      | Ver «Un límite conocido» en la sección 5.                                                               |

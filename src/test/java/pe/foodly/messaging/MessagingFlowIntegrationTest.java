@@ -42,6 +42,7 @@ import pe.foodly.messaging.domain.model.valueobjects.MessageId;
 import pe.foodly.messaging.domain.model.valueobjects.UserIntent;
 import pe.foodly.messaging.domain.ports.ILiaAgentGateway;
 import pe.foodly.messaging.domain.repositories.IConversationRepository;
+import pe.foodly.messaging.support.TestJwt;
 
 /**
  * Cableado real de la Application Layer: MySQL 8, perfil {@code stub} (clientes falsos de Lima) y un
@@ -50,7 +51,7 @@ import pe.foodly.messaging.domain.repositories.IConversationRepository;
  * Se omite si no hay Docker.
  */
 @SpringBootTest(properties = {
-        "messaging.security.jwt.secret=una-clave-de-prueba-de-al-menos-32-bytes!!",
+        "messaging.security.jwt.secret-base64=" + TestJwt.SECRET_BASE64,
         "messaging.security.callback.secret=secreto-de-callback-de-prueba",
         // El job de timeout no debe interferir: aquí no se prueba.
         "messaging.lia.timeout-job.interval-ms=3600000"})

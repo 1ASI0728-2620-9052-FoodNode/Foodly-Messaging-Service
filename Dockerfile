@@ -27,12 +27,12 @@ WORKDIR /app
 COPY --from=build --chown=messaging:messaging /build/app.jar /app/app.jar
 USER messaging:messaging
 
-EXPOSE 8080
+EXPOSE 8083
 
 # El 503 de /actuator/health (por ejemplo, MySQL caído) marca el contenedor como unhealthy.
 # El periodo de gracia cubre el arranque: migraciones de Flyway y conexión a MySQL.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsS "http://localhost:${SERVER_PORT:-8080}/actuator/health" || exit 1
+    CMD curl -fsS "http://localhost:${SERVER_PORT:-8083}/actuator/health" || exit 1
 
 # La memoria se ajusta al límite del contenedor.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]

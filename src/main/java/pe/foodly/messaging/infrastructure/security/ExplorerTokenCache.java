@@ -17,6 +17,10 @@ import pe.foodly.messaging.domain.model.valueobjects.MessageId;
  * callback). Cada token vive lo que dure el menor entre su propia expiración y
  * {@code LIA_TIMEOUT_SECONDS} más un margen. Se pierde al reiniciar el servicio; nunca se persiste ni se
  * registra en logs.
+ *
+ * <p>El token se reenvía tal cual a Business, Radar y Reservation (cada uno lo valida por su cuenta), así que
+ * su claim {@code aud} debe incluir {@code foodly-business}, {@code foodly-radar} y {@code foodly-reservation}
+ * además de {@code foodly-messaging}. Eso lo decide IAM ({@code JWT_AUDIENCES}); ver el README.
  */
 @Component
 public class ExplorerTokenCache implements IExplorerTokenCache {

@@ -4,8 +4,8 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
@@ -21,12 +21,21 @@ import pe.foodly.messaging.application.ExplorerToken;
 import pe.foodly.messaging.domain.model.valueobjects.ExplorerId;
 
 /**
- * Valida el JWT emitido por IAM (HMAC con clave compartida, firma y expiración; 5.1.4) y extrae al
- * usuario. Lo usan el filtro HTTP y el canal STOMP, para que las dos puertas apliquen la misma regla
+ * Valida el JWT emitido por IAM (HS256 con clave compartida, firma, expiración, {@code iss} y {@code aud}; 5.1.4)
+ * y extrae al usuario. Lo usan el filtro HTTP y el canal STOMP, para que las dos puertas apliquen la misma regla
  * (DD-06, QA-1: cada servicio valida el token aunque Kong ya lo haya hecho).
  *
- * <p>Un token es inválido si la firma o la expiración fallan, si no trae {@code exp} (IAM siempre lo
- * incluye) o si el claim del id de usuario no es un UUID. Nunca se registra el token, solo el tipo de fallo.
+ * <p>La clave llega en Base64 ({@code JWT_SECRET_BASE64}) y se decodifica con {@link Decoders#BASE64}, igual que
+ * IAM. El emisor debe ser exactamente {@link JwtProperties#issuer()} y {@code aud} debe incluir
+ * {@link JwtProperties#audience()} ({@code foodly-messaging}).
+ *
+ * <p>Un token es inválido si la firma, la expiración, el emisor o la audiencia fallan, si no trae {@code exp}
+ * (IAM siempre lo incluye) o si el claim del id de usuario no es un UUID. Nunca se registra el token, solo el
+ * tipo de fallo.
+ *
+ * <p>El token validado se reenvía tal cual a Business, Radar y Reservation (ver {@code ExplorerTokenCache}), así
+ * que IAM debe emitir en {@code aud} también {@code foodly-business}, {@code foodly-radar} y
+ * {@code foodly-reservation}: cada uno exige su propia audiencia.
  */
 public class JwtTokenValidator {
 
@@ -40,16 +49,40 @@ public class JwtTokenValidator {
     private final String roleClaim;
 
     public JwtTokenValidator(JwtProperties properties) {
-        String secret = properties.secret();
-        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
-            throw new IllegalStateException(
-                    "JWT_SECRET es obligatorio y debe tener al menos " + MIN_SECRET_BYTES + " bytes.");
-        }
-        // El secreto se usa como bytes UTF-8 (no Base64). Confirmar con quien implementa IAM.
-        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        this.parser = Jwts.parser().verifyWith(key).build();
+        this.parser = Jwts.parser()
+                .verifyWith(signingKey(properties.secretBase64()))
+                .requireIssuer(requireText(properties.issuer(), "JWT_ISSUER"))
+                .requireAudience(requireText(properties.audience(), "JWT_AUDIENCE"))
+                .build();
         this.userIdClaim = properties.userIdClaim();
         this.roleClaim = properties.roleClaim();
+    }
+
+    /** Decodifica la clave como IAM ({@code Decoders.BASE64}) y exige al menos 32 bytes. */
+    private static SecretKey signingKey(String secretBase64) {
+        if (secretBase64 == null || secretBase64.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT_SECRET_BASE64 es obligatorio y debe tener al menos " + MIN_SECRET_BYTES + " bytes.");
+        }
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(secretBase64.trim());
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("JWT_SECRET_BASE64 debe estar en Base64 válido.", e);
+        }
+        if (keyBytes.length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException(
+                    "JWT_SECRET_BASE64 es obligatorio y debe tener al menos " + MIN_SECRET_BYTES
+                            + " bytes una vez decodificado.");
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    private static String requireText(String value, String variable) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(variable + " es obligatorio.");
+        }
+        return value.trim();
     }
 
     public Optional<AuthenticatedExplorer> validate(String rawToken) {
@@ -69,6 +102,7 @@ public class JwtTokenValidator {
                     new ExplorerToken(rawToken, expiration.toInstant()),
                     rolesOf(claims.get(roleClaim))));
         } catch (JwtException | IllegalArgumentException e) {
+            // Firma, expiración, iss, aud o formato: solo se registra el tipo de fallo.
             log.debug("Token rechazado: {}", e.getClass().getSimpleName());
             return Optional.empty();
         }

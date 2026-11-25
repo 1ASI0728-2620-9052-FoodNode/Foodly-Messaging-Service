@@ -48,7 +48,8 @@ class StompAuthChannelInterceptorTest {
 
     @BeforeEach
     void setUp() {
-        JwtTokenValidator validator = new JwtTokenValidator(new JwtProperties(TestJwt.SECRET, "sub", "role"));
+        JwtTokenValidator validator = new JwtTokenValidator(
+                new JwtProperties(TestJwt.SECRET_BASE64, TestJwt.ISSUER, TestJwt.AUDIENCE, "sub", "role"));
         interceptor = new StompAuthChannelInterceptor(validator, ownership, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -95,9 +96,9 @@ class StompAuthChannelInterceptorTest {
 
     @Test
     void connectSinTokenOConUnTokenInvalidoSeRechaza() {
-        String forged = TestJwt.token("otro-secreto-distinto-de-al-menos-32-bytes!!", EXPLORER, TestJwt.EXPLORER_ROLE,
+        String forged = TestJwt.token(TestJwt.OTHER_SECRET_BASE64, EXPLORER, TestJwt.EXPLORER_ROLE,
                 Instant.now().plusSeconds(3600));
-        String expired = TestJwt.token(TestJwt.SECRET, EXPLORER, TestJwt.EXPLORER_ROLE, Instant.now().minusSeconds(5));
+        String expired = TestJwt.token(TestJwt.SECRET_BASE64, EXPLORER, TestJwt.EXPLORER_ROLE, Instant.now().minusSeconds(5));
 
         assertThatThrownBy(() -> interceptor.preSend(frame(StompCommand.CONNECT, null, null, null), channel))
                 .isInstanceOf(MessagingException.class).hasMessageContaining("falta el token");
@@ -117,6 +118,29 @@ class StompAuthChannelInterceptorTest {
                 .isInstanceOf(MessagingException.class)
                 .hasMessageContaining("explorador gastronómico");
         assertThat(StompHeaderAccessor.wrap(connect).getUser()).isNull();
+    }
+
+    @Test
+    void connectConEmisorOAudienciaIncorrectosSeRechaza() {
+        String otherIssuer = TestJwt.withIssuer(EXPLORER, "otro-emisor");
+        String noIssuer = TestJwt.withIssuer(EXPLORER, null);
+        String noAudience = TestJwt.withAudience(EXPLORER, null);
+        String notForMessaging = TestJwt.withAudience(EXPLORER, java.util.List.of("foodly-iam", "foodly-business"));
+        String base64TextAsKey = TestJwt.signedWithTheBase64TextAsKey(EXPLORER);
+
+        for (String jwt : java.util.List.of(otherIssuer, noIssuer, noAudience, notForMessaging, base64TextAsKey)) {
+            assertThatThrownBy(() -> interceptor.preSend(frame(StompCommand.CONNECT, null, "Bearer " + jwt, null), channel))
+                    .isInstanceOf(MessagingException.class).hasMessageContaining("no es válido");
+        }
+    }
+
+    @Test
+    void connectAceptaUnTokenCuyaAudienciaIncluyeFoodlyMessagingJuntoAOtras() {
+        String jwt = TestJwt.withAudience(EXPLORER, java.util.List.of("foodly-business", "foodly-messaging"));
+        Message<byte[]> connect = frame(StompCommand.CONNECT, null, "Bearer " + jwt, null);
+
+        assertThat(interceptor.preSend(connect, channel)).isSameAs(connect);
+        assertThat(StompHeaderAccessor.wrap(connect).getUser()).isNotNull();
     }
 
     // ---- SUBSCRIBE ----

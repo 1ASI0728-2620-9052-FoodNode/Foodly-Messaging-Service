@@ -48,9 +48,9 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${MESSAGING_HOST_PORT:-8081}:8080"
+      - "127.0.0.1:${MESSAGING_HOST_PORT:-8083}:8083"
     environment:
-      SERVER_PORT: "8080"
+      SERVER_PORT: "8083"
       # «-» y no «:-»: MESSAGING_PROFILE= (vacío) quita el perfil stub en lugar de volver al valor por defecto.
       SPRING_PROFILES_ACTIVE: ${MESSAGING_PROFILE-stub}
       # Este MySQL local no usa SSL, y con «caching_sha2_password» (el de MySQL 8) eso exige allowPublicKeyRetrieval.
@@ -59,8 +59,11 @@ services:
       MYSQL_USER: messaging
       MYSQL_PASSWORD: messaging
       MYSQL_SSL_MODE: DISABLED
-      # Solo para desarrollo local. En otros entornos, el mismo secreto que usa IAM.
-      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-0123456789}
+      # La misma clave Base64 que usa IAM (JWT_SECRET_BASE64). Sin valor por defecto: se toma de .env o del entorno
+      # (ver .env.example). Si falta, Messaging no arranca; MySQL sí.
+      JWT_SECRET_BASE64: ${JWT_SECRET_BASE64:-}
+      JWT_ISSUER: ${JWT_ISSUER:-foodly-iam}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-foodly-messaging}
       # Secreto compartido con el Integration System (o con n8n, en direct-n8n). Solo para desarrollo local.
       INTEGRATION_CALLBACK_SECRET: ${INTEGRATION_CALLBACK_SECRET:-local-dev-callback-secret}
       LIA_GATEWAY_MODE: ${LIA_GATEWAY_MODE:-stub}
@@ -71,11 +74,11 @@ services:
       LIA_PATH: ${LIA_PATH:-}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/lia}
       # La URL del callback vista desde n8n, que corre en la misma red.
-      MESSAGING_CALLBACK_URL: http://messaging-service:8080/messaging/callbacks/n8n
+      MESSAGING_CALLBACK_URL: http://messaging-service:8083/messaging/callbacks/n8n
       # Solo se usan sin el perfil stub. «radar» es el servicio de ../radar-service/docker-compose.local.yml.
-      RADAR_URL: ${RADAR_URL:-http://radar:8080}
+      RADAR_URL: ${RADAR_URL:-http://radar:8082}
       BUSINESS_URL: ${BUSINESS_URL:-http://business:8080}
-      RESERVATION_URL: ${RESERVATION_URL:-http://reservation:8080}
+      RESERVATION_URL: ${RESERVATION_URL:-http://reservation:8084}
     networks:
       - foodly-network
     restart: unless-stopped

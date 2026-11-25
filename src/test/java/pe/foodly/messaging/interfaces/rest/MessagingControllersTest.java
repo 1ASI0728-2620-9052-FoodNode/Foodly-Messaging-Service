@@ -56,7 +56,7 @@ import pe.foodly.messaging.support.TestJwt;
 @WebMvcTest(
         controllers = {LiaChatController.class, ConversationController.class, N8nCallbackController.class},
         properties = {
-            "messaging.security.jwt.secret=" + TestJwt.SECRET,
+            "messaging.security.jwt.secret-base64=" + TestJwt.SECRET_BASE64,
             "messaging.security.callback.secret=" + TestJwt.CALLBACK_SECRET
         })
 @Import(SecurityConfig.class)
@@ -208,13 +208,21 @@ class MessagingControllersTest {
     @Test
     void chatConTokenInvalidoDa401() throws Exception {
         String forged = TestJwt.token(
-                "otro-secreto-distinto-de-al-menos-32-bytes!!", EXPLORER, TestJwt.EXPLORER_ROLE,
+                TestJwt.OTHER_SECRET_BASE64, EXPLORER, TestJwt.EXPLORER_ROLE,
                 Instant.now().plusSeconds(3600));
-        String expired = TestJwt.token(TestJwt.SECRET, EXPLORER, TestJwt.EXPLORER_ROLE, Instant.now().minusSeconds(60));
-        String withoutExpiration = TestJwt.token(TestJwt.SECRET, EXPLORER, TestJwt.EXPLORER_ROLE, null);
-        String notAUuid = TestJwt.token(TestJwt.SECRET, "no-es-uuid", TestJwt.EXPLORER_ROLE, Instant.now().plusSeconds(60));
+        String expired = TestJwt.token(TestJwt.SECRET_BASE64, EXPLORER, TestJwt.EXPLORER_ROLE, Instant.now().minusSeconds(60));
+        String withoutExpiration = TestJwt.token(TestJwt.SECRET_BASE64, EXPLORER, TestJwt.EXPLORER_ROLE, null);
+        String notAUuid = TestJwt.token(TestJwt.SECRET_BASE64, "no-es-uuid", TestJwt.EXPLORER_ROLE, Instant.now().plusSeconds(60));
 
-        for (String token : List.of(forged, expired, withoutExpiration, notAUuid, "basura")) {
+        // iss y aud: el contrato JWT v1 de IAM exige iss=foodly-iam y que aud incluya foodly-messaging
+        String otherIssuer = TestJwt.withIssuer(EXPLORER, "otro-emisor");
+        String noIssuer = TestJwt.withIssuer(EXPLORER, null);
+        String noAudience = TestJwt.withAudience(EXPLORER, null);
+        String notForMessaging = TestJwt.withAudience(EXPLORER, List.of("foodly-iam", "foodly-business"));
+        String base64TextAsKey = TestJwt.signedWithTheBase64TextAsKey(EXPLORER);
+
+        for (String token : List.of(forged, expired, withoutExpiration, notAUuid, otherIssuer, noIssuer, noAudience,
+                notForMessaging, base64TextAsKey, "basura")) {
             mvc.perform(chat("{ \"content\": \"hola\" }").header("Authorization", "Bearer " + token))
                     .andExpect(status().isUnauthorized());
         }
@@ -236,7 +244,7 @@ class MessagingControllersTest {
     void chatAceptaElRolComoListaYConPrefijoRole() throws Exception {
         when(sendMessage.handle(any())).thenReturn(
                 new SendMessageResult(ConversationId.of(CONVERSATION), MessageId.of(MESSAGE)));
-        String token = TestJwt.token(TestJwt.SECRET, EXPLORER, List.of("ROLE_gastronomic_explorer"),
+        String token = TestJwt.token(TestJwt.SECRET_BASE64, EXPLORER, List.of("ROLE_gastronomic_explorer"),
                 Instant.now().plusSeconds(3600));
 
         mvc.perform(chat("{ \"content\": \"hola\" }").header("Authorization", "Bearer " + token))

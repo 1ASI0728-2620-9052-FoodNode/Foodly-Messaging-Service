@@ -17,6 +17,9 @@ El workflow de n8n está en [`docs/n8n-lia-workflow.md`](docs/n8n-lia-workflow.m
 
 Requisitos: Docker con Compose v2. Los scripts de `scripts/` son de Bash (en Windows, Git Bash o WSL).
 
+Antes copie `.env.example` a `.env` y defina `JWT_SECRET_BASE64` (la misma clave Base64 que usa IAM; una de prueba se
+genera con `openssl rand -base64 32`). Sin ella Messaging no arranca, aunque MySQL sí.
+
 ```bash
 docker compose -f docker-compose.local.yml up -d --build --wait
 ```
@@ -28,32 +31,34 @@ publican solo en `127.0.0.1`.
 
 | Servicio  | URL / puerto                         | Notas                                              |
 |-----------|--------------------------------------|----------------------------------------------------|
-| Messaging | http://localhost:8081                | API, Swagger, Actuator y WebSocket (`/messaging/ws`) |
+| Messaging | http://localhost:8083                | API, Swagger, Actuator y WebSocket (`/messaging/ws`) |
 | MySQL     | `localhost:3307`                     | base `messaging`, usuario y contraseña `messaging` |
 | n8n       | http://localhost:5678                | opcional: `--profile n8n` (ver más abajo)          |
 
 ```bash
-curl http://localhost:8081/actuator/health     # {"status":"UP"}
+curl http://localhost:8083/actuator/health     # {"status":"UP"}
 ```
 
 Para detener todo: `docker compose -f docker-compose.local.yml down` (con `-v` si además quiere borrar los datos).
-Los puertos del equipo se cambian con `MESSAGING_HOST_PORT` (8081), `MYSQL_HOST_PORT` (3307) y `N8N_HOST_PORT` (5678).
+Los puertos del equipo se cambian con `MESSAGING_HOST_PORT` (8083), `MYSQL_HOST_PORT` (3307) y `N8N_HOST_PORT` (5678).
 
 ### Variantes
 
 | Qué                                   | Cómo                                                                                                      |
 |---------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | Con n8n (solo local)                  | `LIA_GATEWAY_MODE=direct-n8n docker compose -f docker-compose.local.yml --profile n8n up -d --build --wait`, y arme el workflow de [`docs/n8n-lia-workflow.md`](docs/n8n-lia-workflow.md) |
-| Con los microservicios reales         | `MESSAGING_PROFILE= docker compose -f docker-compose.local.yml up -d --build --wait` (quita el perfil `stub`; usa `RADAR_URL`, `BUSINESS_URL` y `RESERVATION_URL`; `radar` es el servicio de `../radar-service` en la misma red) |
+| Con los microservicios reales         | `MESSAGING_PROFILE= docker compose -f docker-compose.local.yml up -d --build --wait` (quita el perfil `stub`; usa `RADAR_URL`, `BUSINESS_URL` y `RESERVATION_URL`, por defecto `http://radar:8082`, `http://business:8080` y `http://reservation:8084`; `radar` es el servicio de `../radar-service` en la misma red) |
 | Ver el aviso de timeout de Lía        | `LIA_STUB_DELAY=60s LIA_TIMEOUT_SECONDS=5 docker compose -f docker-compose.local.yml up -d`: el stub tarda 60 s y a los 5 s Lía ofrece la reserva manual |
 
 ## Conversación completa en modo stub
 
 Con el compose levantado. Los endpoints de usuario exigen un JWT de IAM con el rol `GASTRONOMIC_EXPLORER` y el id
-del explorador como UUID. Para desarrollo, `scripts/dev-token.sh` genera uno firmado con el secreto local:
+del explorador como UUID. Para desarrollo, `scripts/dev-token.sh` genera uno como lo emite IAM (HS256, `iss=foodly-iam`, `aud` con
+`foodly-messaging`), firmado con `JWT_SECRET_BASE64` (requiere OpenSSL 1.1 o superior):
 
 ```bash
-BASE=http://localhost:8081
+export JWT_SECRET_BASE64=<la misma clave que Messaging>
+BASE=http://localhost:8083
 TOKEN=$(scripts/dev-token.sh)
 
 # Escribe un mensaje. El cuerpo va por stdin (--data-binary @-) para que los acentos lleguen bien en cualquier
@@ -145,7 +150,7 @@ No hace falta consultar en bucle: Messaging publica cada respuesta de Lía en `/
 
 | Qué              | Valor                                                                                         |
 |------------------|-----------------------------------------------------------------------------------------------|
-| Endpoint         | `ws://localhost:8081/messaging/ws` (WebSocket nativo, sin SockJS)                             |
+| Endpoint         | `ws://localhost:8083/messaging/ws` (WebSocket nativo, sin SockJS)                             |
 | Autenticación    | header `Authorization: Bearer <JWT>` en el frame **`CONNECT`**. Sin token, con token inválido o con otro rol, la conexión se cierra con un frame `ERROR` |
 | Suscripción      | `/topic/conversations/{conversationId}`, **solo de conversaciones propias** (la de otro explorador se rechaza) |
 | Mensaje recibido | el mismo `MessageResource` que `GET .../messages`                                             |
@@ -158,7 +163,7 @@ Con [`@stomp/stompjs`](https://stomp-js.github.io/):
 import { Client } from '@stomp/stompjs';
 
 const client = new Client({
-  brokerURL: 'ws://localhost:8081/messaging/ws',
+  brokerURL: 'ws://localhost:8083/messaging/ws',
   connectHeaders: { Authorization: `Bearer ${token}` },
   heartbeatIncoming: 10000,
   heartbeatOutgoing: 10000,
@@ -212,7 +217,7 @@ secreto de callback incorrecto), `403` si el rol no es explorador, `404` si la c
 explorador y `409` si se escribe en una conversación cerrada. Todos los errores tienen el mismo formato:
 `{ status, error, message, path, timestamp }`, con el mensaje en español.
 
-Para probar en Swagger (http://localhost:8081/swagger-ui.html): genere un token con `scripts/dev-token.sh`, pulse
+Para probar en Swagger (http://localhost:8083/swagger-ui.html): genere un token con `scripts/dev-token.sh`, pulse
 **Authorize**, pegue el token (sin la palabra `Bearer`) y pruebe `POST /messaging/chat`.
 
 ## Variables de entorno
@@ -224,14 +229,16 @@ Toda la configuración se lee de variables de entorno. En `docker-compose.local.
 | `MYSQL_URL`                       | Sí          | —                        | URL JDBC, p. ej. `jdbc:mysql://host:3306/messaging` |
 | `MYSQL_USER`, `MYSQL_PASSWORD`    | Sí          | —                        | Credenciales de MySQL |
 | `MYSQL_SSL_MODE`                  | No          | `REQUIRED`               | `DISABLED`, `PREFERRED`, `REQUIRED`, `VERIFY_CA` o `VERIFY_IDENTITY`. Aiven exige SSL. Un MySQL local sin SSL necesita `DISABLED` (y, con MySQL 8, `?allowPublicKeyRetrieval=true` en la URL) |
-| `JWT_SECRET`                      | Sí          | —                        | Secreto con el que IAM firma el JWT (HMAC). Mínimo 32 bytes, se usa como texto UTF-8 |
+| `JWT_SECRET_BASE64`               | Sí          | —                        | Clave con la que IAM firma el JWT (HS256), en Base64 estándar. Se decodifica a bytes (mínimo 32), igual que IAM. Solo por entorno, sin valor por defecto |
+| `JWT_ISSUER`                      | No          | `foodly-iam`             | Valor exacto del claim `iss` |
+| `JWT_AUDIENCE`                    | No          | `foodly-messaging`       | Valor que debe estar incluido en el claim `aud` |
 | `JWT_USER_ID_CLAIM`               | No          | `sub`                    | Claim con el id del usuario (un UUID) |
 | `JWT_ROLE_CLAIM`                  | No          | `role`                   | Claim con el rol (texto o lista) |
 | `INTEGRATION_CALLBACK_SECRET`     | Sí          | —                        | Secreto compartido con el Integration System para el callback (header `X-Callback-Secret`) |
 | `LIA_GATEWAY_MODE`                | No          | `integration-system` (`stub` con el perfil `stub`) | `integration-system`, `direct-n8n` (solo local) o `stub` |
 | `INTEGRATION_SYSTEM_URL`, `LIA_PATH` | En `integration-system` | —          | La solicitud va a `INTEGRATION_SYSTEM_URL` + `LIA_PATH` |
 | `N8N_WEBHOOK_URL`                 | En `direct-n8n` | —                    | Webhook de producción del workflow de n8n |
-| `MESSAGING_CALLBACK_URL`          | No          | `http://localhost:8080/messaging/callbacks/n8n` | Callback visto desde n8n (`direct-n8n`) |
+| `MESSAGING_CALLBACK_URL`          | No          | `http://localhost:8083/messaging/callbacks/n8n` | Callback visto desde n8n (`direct-n8n`) |
 | `LIA_TIMEOUT_SECONDS`             | No          | `20`                     | Tiempo que tiene Lía para responder; pasado ese tiempo, el explorador recibe el aviso con la reserva manual |
 | `LIA_REQUEST_TIMEOUT`             | No          | `5s`                     | Tiempo máximo de la llamada que *entrega* la solicitud a Lía |
 | `LIA_STUB_DELAY`                  | No          | `1s`                     | Espera del modo `stub` antes de responder |
@@ -241,16 +248,50 @@ Toda la configuración se lee de variables de entorno. En `docker-compose.local.
 | `LIA_TIMEOUT_JOB_BATCH_SIZE`      | No          | `50`                     | Máximo de avisos por revisión |
 | `MESSAGING_MAX_LENGTH`            | No          | `1000`                   | Longitud máxima de un mensaje |
 | `MESSAGING_RADAR_K_RING`          | No          | `2`                      | k-ring con el que se consulta a Radar |
-| `RADAR_URL`, `BUSINESS_URL`, `RESERVATION_URL` | Sin el perfil `stub` | — | URL base de cada contexto (timeout de 3 s; propagan el JWT del explorador) |
+| `RADAR_URL`, `BUSINESS_URL`, `RESERVATION_URL` | Sin los perfiles `stub` ni `local` | — (perfil `local`: `http://localhost:8082`, `:8080` y `:8084`) | URL base de cada contexto (timeout de 3 s; propagan el JWT del explorador) |
 | `MESSAGING_WS_ALLOWED_ORIGINS`    | No          | `*`                      | Orígenes permitidos del handshake WebSocket |
-| `SERVER_PORT`                     | No          | `8080`                   | Puerto HTTP |
+| `SERVER_PORT`                     | No          | `8083`                   | Puerto HTTP |
 
 Perfil de Spring `stub` (`SPRING_PROFILES_ACTIVE=stub`): reemplaza los clientes de Radar, Business y Reservation por
 datos de ejemplo de Lima y pone `LIA_GATEWAY_MODE=stub` si no se indica otro. **No es para producción.**
 
+Perfil de Spring `local` (`SPRING_PROFILES_ACTIVE=local`): los demás servicios corren en su equipo. `RADAR_URL`,
+`BUSINESS_URL` y `RESERVATION_URL` valen por defecto `http://localhost:8082`, `http://localhost:8080` y
+`http://localhost:8084`, el mapa de puertos del proyecto: Business 8080, IAM 8081, Radar 8082, Messaging 8083 y
+Reservation 8084. No cambia ningún secreto: `JWT_SECRET_BASE64` sigue siendo obligatoria.
+
 Rutas de los contextos proveedores (configurables en `application.yml`, a confirmar con cada contexto):
 Radar `POST /radar/search`; Business `GET /business-api/huariques/{id}` y `.../{id}/menu`; Reservation
 `POST /reservation-api/reservations` y `GET /reservation-api/reservations/{id}`.
+
+## JWT de IAM: validación y reenvío a otros servicios
+
+Messaging valida el JWT por su cuenta, en las dos puertas con la misma regla (`JwtTokenValidator`): el filtro REST y
+el frame STOMP `CONNECT`. Exige firma HS256 con `JWT_SECRET_BASE64` (Base64 decodificado a bytes, mínimo 32, igual que
+`JwtTokenIssuer` de IAM), expiración, `iss` igual a `JWT_ISSUER` (`foodly-iam`) y que `aud` incluya `JWT_AUDIENCE`
+(`foodly-messaging`). Un token sin `iss` o `aud` (el formato anterior de IAM) responde 401 en REST y cierra la conexión
+STOMP.
+
+**El token se reenvía.** `ExplorerTokenCache` guarda el JWT del explorador y los clientes de Radar, Business y
+Reservation lo envían tal cual en `Authorization: Bearer`. Cada uno lo valida con su propia audiencia, así que el `aud`
+que emite IAM debe incluir **todas**:
+
+| Destino      | Audiencia que exige | Llamadas que le reenvían el token |
+|--------------|---------------------|-----------------------------------|
+| Messaging    | `foodly-messaging`  | (valida el token de entrada)      |
+| Radar        | `foodly-radar`      | `POST /radar/search`              |
+| Business     | `foodly-business`   | `GET /business-api/huariques/{id}` y `.../menu` |
+| Reservation  | `foodly-reservation`| `POST /reservation-api/reservations`, `GET .../{id}` |
+
+Verificado el 24 de noviembre de 2026 con la rama `feature/jwt-issuer-audience` de Foodly-IAM-Service: su
+configuración por defecto (`JWT_AUDIENCES=foodly-iam,foodly-business,foodly-radar,foodly-messaging,foodly-reservation,foodly-community`)
+emite un token con `iss=foodly-iam` y esos seis destinatarios, y `JwtTokenIssuer` los incluye en `aud`. **Esos cambios de
+IAM aún no están en su `develop`**: hasta que se fusionen, IAM no emite `iss` ni `aud` y Messaging rechaza sus tokens.
+Si alguien cambia `JWT_AUDIENCES` en IAM, debe conservar esos cuatro valores o el reenvío fallará con 401 en el servicio
+que falte. Reservation todavía es un esqueleto: su audiencia está reservada en IAM pero aún no se probó contra su validación.
+
+El token vive en el cache como máximo `LIA_TIMEOUT_SECONDS` más `LIA_TOKEN_CACHE_MARGIN_SECONDS` (o hasta que venza). Los
+servicios destino aplican además su propia expiración.
 
 ## Cómo responde Lía
 
@@ -288,7 +329,7 @@ Para ejecutar el servicio desde el IDE o con Maven, levante solo MySQL y use el 
 ```bash
 docker compose -f docker-compose.local.yml up -d --wait mysql
 MYSQL_URL='jdbc:mysql://localhost:3307/messaging?allowPublicKeyRetrieval=true' MYSQL_USER=messaging MYSQL_PASSWORD=messaging \
-MYSQL_SSL_MODE=DISABLED JWT_SECRET=local-dev-only-secret-change-me-0123456789 INTEGRATION_CALLBACK_SECRET=dev \
+MYSQL_SSL_MODE=DISABLED JWT_SECRET_BASE64=<la misma clave que usa IAM> INTEGRATION_CALLBACK_SECRET=dev \
 SPRING_PROFILES_ACTIVE=stub ./mvnw spring-boot:run
 ```
 

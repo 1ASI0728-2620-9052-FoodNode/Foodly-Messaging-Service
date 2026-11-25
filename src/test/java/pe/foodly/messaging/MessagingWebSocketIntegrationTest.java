@@ -60,7 +60,7 @@ import pe.foodly.messaging.support.TestJwt;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-            "messaging.security.jwt.secret=" + TestJwt.SECRET,
+            "messaging.security.jwt.secret-base64=" + TestJwt.SECRET_BASE64,
             "messaging.security.callback.secret=" + TestJwt.CALLBACK_SECRET,
             "messaging.lia.timeout-job.interval-ms=3600000"
         })
@@ -270,7 +270,10 @@ class MessagingWebSocketIntegrationTest {
 
     @Test
     void elCanalRechazaLaConexionSinTokenOConRolDeDueno() throws Exception {
-        for (String jwt : new String[] {null, TestJwt.owner(EXPLORER), "no-es-un-jwt"}) {
+        for (String jwt : new String[] {null, TestJwt.owner(EXPLORER), "no-es-un-jwt",
+                TestJwt.withIssuer(EXPLORER, "otro-emisor"),
+                TestJwt.withAudience(EXPLORER, java.util.List.of("foodly-iam", "foodly-business")),
+                TestJwt.signedWithTheBase64TextAsKey(EXPLORER)}) {
             CompletableFuture<String> errors = new CompletableFuture<>();
             stompClient.connectAsync("ws://localhost:" + port + "/messaging/ws", new WebSocketHttpHeaders(),
                     headersWith(jwt), new StompSessionHandlerAdapter() {

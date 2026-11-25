@@ -20,13 +20,18 @@ spring:
     enabled: true
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8083}
 
 messaging:
   security:
     jwt:
-      # Mismos valores que IAM: el secreto se usa como texto UTF-8 (mínimo 32 bytes).
-      secret: ${JWT_SECRET}
+      # La misma clave que usa IAM para firmar (JWT_SECRET_BASE64): Base64 estándar, se decodifica a bytes
+      # (mínimo 32), igual que JwtTokenIssuer de IAM. No tiene valor por defecto: solo por entorno.
+      secret-base64: ${JWT_SECRET_BASE64}
+      # iss exacto y aud que debe incluir este valor (contrato JWT v1 de IAM). El token se reenvía a Business,
+      # Radar y Reservation, que exigen su propia audiencia: IAM debe emitirlas todas en aud.
+      issuer: ${JWT_ISSUER:foodly-iam}
+      audience: ${JWT_AUDIENCE:foodly-messaging}
       user-id-claim: ${JWT_USER_ID_CLAIM:sub}
       role-claim: ${JWT_ROLE_CLAIM:role}
     callback:
@@ -53,7 +58,7 @@ messaging:
       path: ${LIA_PATH:}
     direct-n8n:
       webhook-url: ${N8N_WEBHOOK_URL:}
-      callback-url: ${MESSAGING_CALLBACK_URL:http://localhost:8080/messaging/callbacks/n8n}
+      callback-url: ${MESSAGING_CALLBACK_URL:http://localhost:8083/messaging/callbacks/n8n}
     timeout-job:
       interval-ms: ${LIA_TIMEOUT_JOB_INTERVAL_MS:10000}
       lookback-hours: ${LIA_TIMEOUT_LOOKBACK_HOURS:24}
@@ -72,3 +77,20 @@ messaging:
       url: ${RESERVATION_URL}
       create-path: /reservation-api/reservations
       status-path: /reservation-api/reservations/{id}
+
+---
+# Perfil "local": los demás servicios corren en el equipo, con el mapa de puertos del proyecto
+# (Business 8080, IAM 8081, Radar 8082, Messaging 8083, Reservation 8084). Cada URL se puede cambiar por entorno.
+spring:
+  config:
+    activate:
+      on-profile: local
+
+messaging:
+  clients:
+    radar:
+      url: ${RADAR_URL:http://localhost:8082}
+    business:
+      url: ${BUSINESS_URL:http://localhost:8080}
+    reservation:
+      url: ${RESERVATION_URL:http://localhost:8084}

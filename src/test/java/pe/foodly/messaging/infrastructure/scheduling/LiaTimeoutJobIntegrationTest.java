@@ -32,6 +32,7 @@ import pe.foodly.messaging.domain.model.valueobjects.MessageContent;
 import pe.foodly.messaging.domain.model.valueobjects.MessageId;
 import pe.foodly.messaging.domain.ports.ILiaAgentGateway;
 import pe.foodly.messaging.domain.repositories.IConversationRepository;
+import pe.foodly.messaging.support.TestJwt;
 
 /**
  * {@code LiaTimeoutJob} con MySQL real: la consulta nativa con {@code JSON_EXTRACT}, el aviso y su
@@ -39,7 +40,7 @@ import pe.foodly.messaging.domain.repositories.IConversationRepository;
  * evita que corra solo). Se omite si no hay Docker.
  */
 @SpringBootTest(properties = {
-        "messaging.security.jwt.secret=una-clave-de-prueba-de-al-menos-32-bytes!!",
+        "messaging.security.jwt.secret-base64=" + TestJwt.SECRET_BASE64,
         "messaging.security.callback.secret=secreto-de-callback-de-prueba",
         "messaging.lia.timeout-seconds=1",
         "messaging.lia.timeout-job.interval-ms=3600000"})
